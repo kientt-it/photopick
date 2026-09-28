@@ -1,0 +1,1 @@
+ALTER TABLE `images` ADD `drive_thumbnail_link` text;

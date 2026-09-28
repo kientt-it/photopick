@@ -1,0 +1,20 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1790396015658,
+      "tag": "0000_military_next_avengers",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1790397184469,
+      "tag": "0001_gigantic_miss_america",
+      "breakpoints": true
+    }
+  ]
+}

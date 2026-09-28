@@ -1,0 +1,8 @@
+# Choose one authentication method and uncomment its variables.
+#
+# Public Google Drive folder ("Anyone with the link" can view):
+# DRIVE_API_KEY="your-google-drive-api-key"
+#
+# Private Google Drive folder shared with a service account:
+# GOOGLE_SERVICE_ACCOUNT_EMAIL="photo-pick@lathanh.iam.gserviceaccount.com"
+# GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
