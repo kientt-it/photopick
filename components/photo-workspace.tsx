@@ -11,15 +11,19 @@ function PhotoImage({src,alt}:{src:string;alt:string}) {
 
 function Preview({photo,photos,onClose,onNavigate,onToggle,onSaveNote,allowNote,locked,canSelect}:{photo:Photo;photos:Photo[];onClose:()=>void;onNavigate:(photo:Photo)=>void;onToggle:(photo:Photo)=>void;onSaveNote:(photo:Photo,note:string)=>Promise<void>;allowNote:boolean;locked:boolean;canSelect:boolean}) {
   const [zoom,setZoom]=useState(1);
+  const [pan,setPan]=useState({x:0,y:0});
+  const [dragging,setDragging]=useState(false);
   const [note,setNote]=useState(photo.note??"");
   const [saving,setSaving]=useState(false);
   const [message,setMessage]=useState("");
   const stage=useRef<HTMLDivElement>(null);
+  const image=useRef<HTMLImageElement>(null);
+  const drag=useRef<{pointerId:number;startX:number;startY:number;panX:number;panY:number}|null>(null);
   const close=useRef<HTMLButtonElement>(null);
   const index=photos.findIndex(item=>item.id===photo.id);
   const prev=useCallback(()=>{if(index>0)onNavigate(photos[index-1]);},[index,onNavigate,photos]);
   const next=useCallback(()=>{if(index<photos.length-1)onNavigate(photos[index+1]);},[index,onNavigate,photos]);
-  useEffect(()=>{setNote(photo.note??"");setZoom(1);setMessage("");},[photo.id,photo.note]);
+  useEffect(()=>{setNote(photo.note??"");setZoom(1);setPan({x:0,y:0});setMessage("");},[photo.id,photo.note]);
   useEffect(()=>{close.current?.focus();},[]);
   useEffect(()=>{
     const key=(event:KeyboardEvent)=>{
@@ -31,13 +35,24 @@ function Preview({photo,photos,onClose,onNavigate,onToggle,onSaveNote,allowNote,
     };
     window.addEventListener("keydown",key);return()=>window.removeEventListener("keydown",key);
   },[onClose,prev,next,onToggle,photo,locked]);
+  const clampPan=(x:number,y:number,scale=zoom)=>{
+    const bounds=stage.current,photoImage=image.current;
+    if(!bounds||!photoImage||scale<=1)return {x:0,y:0};
+    const maxX=Math.max(0,(photoImage.clientWidth*scale-bounds.clientWidth)/2);
+    const maxY=Math.max(0,(photoImage.clientHeight*scale-bounds.clientHeight)/2);
+    return {x:Math.max(-maxX,Math.min(maxX,x)),y:Math.max(-maxY,Math.min(maxY,y))};
+  };
+  const changeZoom=(value:number)=>{const scale=Math.max(.5,Math.min(3,value));setZoom(scale);setPan(current=>clampPan(current.x,current.y,scale));};
+  const startDrag=(event:React.PointerEvent<HTMLImageElement>)=>{if(zoom<=1)return;event.preventDefault();event.currentTarget.setPointerCapture(event.pointerId);drag.current={pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,panX:pan.x,panY:pan.y};setDragging(true);};
+  const moveDrag=(event:React.PointerEvent<HTMLImageElement>)=>{const current=drag.current;if(!current||current.pointerId!==event.pointerId)return;setPan(clampPan(current.panX+event.clientX-current.startX,current.panY+event.clientY-current.startY));};
+  const stopDrag=(event:React.PointerEvent<HTMLImageElement>)=>{if(drag.current?.pointerId!==event.pointerId)return;drag.current=null;setDragging(false);};
   const save=async()=>{setSaving(true);setMessage("");try{await onSaveNote(photo,note);setMessage("Đã lưu ghi chú.");}catch(error){setMessage(error instanceof Error?error.message:"Không lưu được ghi chú.");}finally{setSaving(false);}};
   return <div className="modal-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget)onClose();}}><section className="lightbox" role="dialog" aria-modal="true" aria-label={`Xem ảnh ${photo.fileName}`}>
     <div className="lightbox-top"><div><strong>{photo.fileName}</strong><span>{index+1} / {photos.length}</span></div><button ref={close} className="icon-btn" onClick={onClose} aria-label="Đóng ảnh"><X size={21}/></button></div>
-    <div className="lightbox-body"><div className="lightbox-visual"><div className="lightbox-tools"><button onClick={()=>setZoom(Math.max(.5,zoom-.25))} aria-label="Thu nhỏ"><Minus size={18}/></button><span>{Math.round(zoom*100)}%</span><button onClick={()=>setZoom(Math.min(3,zoom+.25))} aria-label="Phóng to"><Plus size={18}/></button><button onClick={()=>setZoom(1)} aria-label="Vừa màn hình"><Maximize2 size={18}/></button><button onClick={()=>stage.current?.requestFullscreen?.()} aria-label="Toàn màn hình"><Expand size={18}/></button></div><div className="lightbox-stage" ref={stage} onWheel={event=>{event.preventDefault();setZoom(value=>Math.max(.5,Math.min(3,value+(event.deltaY<0?.15:-.15))));}}><button className="stage-arrow left" onClick={prev} disabled={index===0} aria-label="Ảnh trước"><ChevronLeft/></button><img src={photo.previewUrl} alt={photo.fileName} style={{transform:`scale(${zoom})`}}/><button className="stage-arrow right" onClick={next} disabled={index===photos.length-1} aria-label="Ảnh sau"><ChevronRight/></button></div></div>
+    <div className="lightbox-body"><div className="lightbox-visual"><div className="lightbox-tools"><button onClick={()=>changeZoom(zoom-.25)} aria-label="Thu nhỏ"><Minus size={18}/></button><span>{Math.round(zoom*100)}%</span><button onClick={()=>changeZoom(zoom+.25)} aria-label="Phóng to"><Plus size={18}/></button><button onClick={()=>changeZoom(1)} aria-label="Vừa màn hình"><Maximize2 size={18}/></button><button onClick={()=>stage.current?.requestFullscreen?.()} aria-label="Toàn màn hình"><Expand size={18}/></button></div><div className="lightbox-stage" ref={stage} onWheel={event=>{event.preventDefault();changeZoom(zoom+(event.deltaY<0?.15:-.15));}}><button className="stage-arrow left" onClick={prev} disabled={index===0} aria-label="Ảnh trước"><ChevronLeft/></button><img ref={image} className={`preview-image ${zoom>1?"zoomed":""}${dragging?" dragging":""}`} src={photo.previewUrl} alt={photo.fileName} draggable={false} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={stopDrag} onPointerCancel={stopDrag} onLostPointerCapture={()=>{drag.current=null;setDragging(false);}} style={{transform:`translate3d(${pan.x}px,${pan.y}px,0) scale(${zoom})`}}/><button className="stage-arrow right" onClick={next} disabled={index===photos.length-1} aria-label="Ảnh sau"><ChevronRight/></button></div></div>
     <aside className="lightbox-side"><p className="eyebrow">CHI TIẾT ẢNH</p><h2>{photo.fileName}</h2><p className="subtle">Nguồn: {photo.driveUrl?"Google Drive":"Album ảnh"}</p>{photo.driveUrl&&<a href={photo.driveUrl} target="_blank" rel="noreferrer" className="plain-link">Mở trên Google Drive ↗</a>}<button className={`wide-select ${photo.selected?"chosen":""}`} onClick={()=>onToggle(photo)} disabled={locked}>{!canSelect?"Đăng nhập để chọn ảnh":photo.selected?<><Check size={19}/> Đã chọn · Bỏ chọn</>:<><Check size={19}/> Chọn ảnh này</>}</button>{locked&&<p className="hint">Lựa chọn đã gửi. Hãy chọn lại để chỉnh sửa.</p>}
       {allowNote&&<div className="note-field"><label htmlFor="photo-note">Ghi chú cho ảnh</label><textarea id="photo-note" value={note} onChange={event=>setNote(event.target.value)} maxLength={2000} placeholder="Ví dụ: Cần crop phần bên trái..." disabled={locked}/><button className="secondary-btn" onClick={save} disabled={saving||locked||(canSelect&&note===(photo.note??""))}>{saving?"Đang lưu...":canSelect?"Lưu ghi chú":"Đăng nhập để ghi chú"}</button>{message&&<p role="status" className="hint">{message}</p>}</div>}
-      <p className="keyboard-tip">← → chuyển ảnh · Space chọn ảnh · Esc đóng</p></aside></div>
+      <p className="keyboard-tip">← → chuyển ảnh · Space chọn ảnh · Kéo ảnh khi zoom · Esc đóng</p></aside></div>
   </section></div>;
 }
 
