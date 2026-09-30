@@ -1,4 +1,4 @@
-# Chọn Ảnh — Preview & duyệt ảnh
+# PhotoPick — Preview & duyệt ảnh
 
 Website cho phép quản trị viên tạo album, kết nối thư mục Google Drive, đồng bộ danh sách ảnh; người dùng xem, chọn, ghi chú và xác nhận ảnh; quản trị viên xem kết quả và xuất Excel.
 
@@ -74,10 +74,11 @@ npm run db:generate
 npm run build
 node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0000_military_next_avengers.sql
 node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0001_gigantic_miss_america.sql
+node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0002_album-visibility.sql
 npm run dev
 ```
 
-Trong chế độ chạy thử tại máy, mở `/signin-with-chatgpt?return_to=/albums` để dùng đăng nhập giả lập của máy phát triển. Người dùng đầu tiên được cấp vai trò quản trị viên. Hệ thống không tự tạo album hoặc ảnh; tạo album trong trang quản trị rồi đồng bộ Drive.
+Trong chế độ chạy thử tại máy, mở `/signin-with-chatgpt?return_to=/albums` để dùng đăng nhập giả lập của máy phát triển. Tài khoản mới chỉ được cấp quyền quản trị nếu email có trong `ADMIN_EMAILS`; tài khoản quản trị hiện có được giữ nguyên. Hệ thống không tự tạo album hoặc ảnh; tạo album trong trang quản trị rồi đồng bộ Drive.
 
 ## 7. Kết nối Google Drive
 
@@ -96,11 +97,20 @@ Sau đó mở `/admin/albums/create`, nhập URL dạng `https://drive.google.co
 
 Khi triển khai, đặt các giá trị trên thành **secret** của Worker hoặc trong cấu hình bí mật của nền tảng hosting; file `.dev.vars` chỉ dùng tại máy.
 
-## 8. Kiểm tra
+## 8. Đăng nhập Google và album công khai
+
+1. Trong Google Cloud, tạo OAuth Client ID loại **Web application** và thêm URI chuyển hướng chính xác: `https://<tên-miền>/api/auth/google/callback` (khi chạy tại máy dùng `http://localhost:5173/api/auth/google/callback`).
+2. Đặt `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `AUTH_SESSION_SECRET` và `ADMIN_EMAILS` trong `.dev.vars` hoặc secrets của Worker. `AUTH_SESSION_SECRET` cần là chuỗi ngẫu nhiên dài ít nhất 32 byte. `ADMIN_EMAILS` là danh sách email, phân cách bằng dấu phẩy.
+3. Khi OAuth được cấu hình, khách có thể xem album công khai mà không đăng nhập. Album riêng tư cần tài khoản Google. Mọi thao tác chọn ảnh, ghi chú, gửi lựa chọn và quản trị đều cần đăng nhập.
+4. Trong trang quản trị, đặt quyền xem album thành **Công khai** hoặc **Riêng tư**. Ảnh đầu tiên trong album được tự động dùng làm ảnh bìa sau khi đồng bộ Drive.
+
+Ứng dụng tự bổ sung cột quyền xem nếu cơ sở dữ liệu Worker chưa nhận migration mới. Khi chạy tại máy, vẫn áp dụng migration `0002_album-visibility.sql` như lệnh ở trên.
+
+## 9. Kiểm tra
 
 - Không có dữ liệu album hoặc ảnh mẫu trong mã nguồn.
 
-## 9. Cấu trúc chính
+## 10. Cấu trúc chính
 
 ```text
 app/                 Trang, CSS và API routes

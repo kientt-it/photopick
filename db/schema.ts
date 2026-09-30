@@ -18,6 +18,7 @@ export const albums = sqliteTable("albums", {
   maxSelection: integer("max_selection"),
   allowNote: integer("allow_note", { mode: "boolean" }).notNull().default(true),
   allowEditAfterSubmit: integer("allow_edit_after_submit", { mode: "boolean" }).notNull().default(false),
+  visibility: text("visibility").notNull().default("PRIVATE"),
   startDate: text("start_date"),
   endDate: text("end_date"),
   status: text("status").notNull().default("DRAFT"),

@@ -7,15 +7,16 @@ async function request<T>(path:string, options?:RequestInit):Promise<T>{
 }
 const post=<T>(path:string,value:unknown)=>request<T>(path,{method:"POST",body:JSON.stringify(value)});
 export const api={
-  bootstrap:()=>request<{user:User;albums:Album[];stats:Record<string,number>|null}>("bootstrap"),
+  bootstrap:()=>request<{user:User|null;albums:Album[];stats:Record<string,number>|null}>("bootstrap"),
   album:(id:string,filter:string,search:string,offset:number)=>request<AlbumData>(`album/${encodeURIComponent(id)}?filter=${encodeURIComponent(filter)}&search=${encodeURIComponent(search)}&offset=${offset}`),
   albumConfig:(id:string)=>request<{album:Album}>(`albums/${encodeURIComponent(id)}`),
   selection:(value:{albumId:string;imageId:string;selected?:boolean;note?:string})=>post<{selected:boolean;note:string;selectedAt:string|null;selectedCount:number;sessionStatus:string}>("selection",value),
   submit:(albumId:string)=>post<{submittedAt:string;selectedCount:number}>("submit",{albumId}),
+  reselect:(albumId:string)=>post<{status:string}>("reselect",{albumId}),
   saveAlbum:(value:Partial<Album>)=>post<{id:string}>("albums",value),
   sync:(id:string)=>post<{added:number;updated:number;unchanged:number;removed:number;lastSyncAt:string}>(`albums/${encodeURIComponent(id)}/sync`,{}),
   results:(albumId?:string)=>request<{results:Result[]}>(`results${albumId?`?albumId=${encodeURIComponent(albumId)}`:""}`),
   result:(id:string)=>request<{session:Result;images:import("@/types").Photo[]}>(`results/${encodeURIComponent(id)}`),
   users:()=>request<{users:(User&{completedCount:number})[]}>("users"),
-  settings:()=>request<{driveConfigured:boolean;method:string}>("settings"),
+  settings:()=>request<{driveConfigured:boolean;method:string;googleAuthConfigured:boolean}>("settings"),
 };

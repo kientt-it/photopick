@@ -1,0 +1,1 @@
+ALTER TABLE `albums` ADD `visibility` text DEFAULT 'PRIVATE' NOT NULL;

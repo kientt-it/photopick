@@ -6,3 +6,11 @@
 # Private Google Drive folder shared with a service account:
 # GOOGLE_SERVICE_ACCOUNT_EMAIL="photo-pick@lathanh.iam.gserviceaccount.com"
 # GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+
+# Google sign-in (OAuth 2.0 Web application credentials).
+# Add https://your-site.example/api/auth/google/callback to Authorized redirect URIs.
+# GOOGLE_OAUTH_CLIENT_ID="your-client-id.apps.googleusercontent.com"
+# GOOGLE_OAUTH_CLIENT_SECRET="your-client-secret"
+# AUTH_SESSION_SECRET="generate-a-long-random-secret-at-least-32-bytes"
+# Comma-separated email addresses allowed to administer PhotoPick.
+# ADMIN_EMAILS="admin@example.com"

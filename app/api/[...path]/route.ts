@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { ApiError, audit, canEdit, currentUser, db, getAlbum, getOrCreateSession, now, requireAdmin, uid } from "@/lib/server";
+import { ApiError, audit, canEdit, currentUserOptional, db, ensureCurrentSchema, getAlbum, getOrCreateSession, now, requireAdmin, requireUser, uid } from "@/lib/server";
 import { fetchDriveImage, fetchDriveThumbnail, folderIdFromUrl, listDriveImages } from "@/lib/drive";
 import { createXlsx } from "@/lib/xlsx";
 
@@ -12,6 +12,7 @@ const albumInput = z.object({
   driveFolderUrl:z.string().trim().default(""),minSelection:z.number().int().min(0).max(10000).default(0),
   maxSelection:z.number().int().min(1).max(10000).nullable().default(null),allowNote:z.boolean().default(true),
   allowEditAfterSubmit:z.boolean().default(false),startDate:z.string().nullable().default(null),endDate:z.string().nullable().default(null),
+  visibility:z.enum(["PUBLIC","PRIVATE"]).default("PRIVATE"),
   status:z.enum(["DRAFT","ACTIVE","INACTIVE","ARCHIVED"]).default("DRAFT"),
 }).refine(v=>v.maxSelection===null || v.maxSelection>=v.minSelection,{message:"Số ảnh tối đa phải lớn hơn hoặc bằng số tối thiểu."})
   .refine(v=>!v.startDate || !v.endDate || v.startDate<=v.endDate,{message:"Ngày kết thúc phải sau ngày bắt đầu."});
@@ -19,33 +20,36 @@ const albumInput = z.object({
 async function handle(request:NextRequest, context:Context) {
   const {path}=await context.params;
   const section=path[0];
-  const user=await currentUser();
+  const user=await currentUserOptional();
   const database=db();
+  await ensureCurrentSchema(database);
   const url=new URL(request.url);
   if(request.method==="GET" && section==="bootstrap") {
-    const albums=await database.prepare("SELECT a.id,a.name,a.description,a.status,a.drive_folder_url AS driveFolderUrl,a.min_selection AS minSelection,a.max_selection AS maxSelection,a.last_sync_at AS lastSyncAt,COUNT(i.id) AS imageCount FROM albums a LEFT JOIN images i ON i.album_id=a.id AND i.status='ACTIVE' GROUP BY a.id ORDER BY a.created_at DESC").all();
-    const visible=user.role==="ADMIN"?albums.results:albums.results.filter((a:Record<string,unknown>)=>a.status==="ACTIVE");
-    const stats=user.role==="ADMIN"?await database.prepare("SELECT (SELECT COUNT(*) FROM albums) AS totalAlbums,(SELECT COUNT(*) FROM albums WHERE status='ACTIVE') AS activeAlbums,(SELECT COUNT(*) FROM images WHERE status='ACTIVE') AS totalImages,(SELECT COUNT(*) FROM image_selections WHERE selected=1) AS totalSelected,(SELECT COUNT(*) FROM selection_sessions WHERE status='SUBMITTED') AS completeUsers,(SELECT COUNT(*) FROM selection_sessions WHERE status='DRAFT') AS pendingUsers").first():null;
+    const albums=await database.prepare("SELECT a.id,a.name,a.description,a.status,a.visibility,a.visibility='PUBLIC' AS isPublic,CASE WHEN ? = 1 THEN a.drive_folder_url ELSE NULL END AS driveFolderUrl,a.min_selection AS minSelection,a.max_selection AS maxSelection,a.last_sync_at AS lastSyncAt,(SELECT x.thumbnail_url FROM images x WHERE x.album_id=a.id AND x.status='ACTIVE' ORDER BY x.created_at,x.file_name LIMIT 1) AS coverUrl,COUNT(i.id) AS imageCount FROM albums a LEFT JOIN images i ON i.album_id=a.id AND i.status='ACTIVE' GROUP BY a.id ORDER BY a.created_at DESC").bind(Number(user?.role==="ADMIN")).all();
+    const visible=user?.role==="ADMIN"?albums.results:albums.results.filter((a:Record<string,unknown>)=>a.status==="ACTIVE"&&(user||a.isPublic));
+    const stats=user?.role==="ADMIN"?await database.prepare("SELECT (SELECT COUNT(*) FROM albums) AS totalAlbums,(SELECT COUNT(*) FROM albums WHERE status='ACTIVE') AS activeAlbums,(SELECT COUNT(*) FROM images WHERE status='ACTIVE') AS totalImages,(SELECT COUNT(*) FROM image_selections WHERE selected=1) AS totalSelected,(SELECT COUNT(*) FROM selection_sessions WHERE status='SUBMITTED') AS completeUsers,(SELECT COUNT(*) FROM selection_sessions WHERE status='DRAFT') AS pendingUsers").first():null;
     return json({user,albums:visible,stats});
   }
   if(request.method==="GET" && section==="album" && path[1]) {
     const album=await getAlbum(path[1]);
-    if(album.status!=="ACTIVE" && user.role!=="ADMIN") throw new ApiError(403,"Album hiện không mở để xem.");
-    const session=await getOrCreateSession(path[1],user.id);
+    if(user?.role!=="ADMIN"&&album.status!=="ACTIVE") throw new ApiError(404,"Không tìm thấy album đang mở.");
+    if(!user&&!album.isPublic) throw new ApiError(401,"Đăng nhập bằng Google để xem album riêng tư.");
+    const session=user?await getOrCreateSession(path[1],user.id):null;
     const filter=url.searchParams.get("filter")??"all";
     const search=(url.searchParams.get("search")??"").slice(0,100);
     const offset=Math.max(0,Math.min(100000,Number(url.searchParams.get("offset")??0)||0));
     let where="i.album_id = ? AND i.status = 'ACTIVE'";
     const args:(string|number|null)[]=[path[1]];
     if(search){where+=" AND i.file_name LIKE ?";args.push(`%${search}%`);}
-    if(filter==="selected"){where+=" AND EXISTS (SELECT 1 FROM image_selections s WHERE s.image_id=i.id AND s.session_id=? AND s.selected=1)";args.push(String(session.id));}
-    if(filter==="unselected"){where+=" AND NOT EXISTS (SELECT 1 FROM image_selections s WHERE s.image_id=i.id AND s.session_id=? AND s.selected=1)";args.push(String(session.id));}
-    if(filter==="noted"){where+=" AND EXISTS (SELECT 1 FROM image_selections s WHERE s.image_id=i.id AND s.session_id=? AND LENGTH(TRIM(s.note))>0)";args.push(String(session.id));}
+    if(filter==="selected"){where+=" AND EXISTS (SELECT 1 FROM image_selections s WHERE s.image_id=i.id AND s.session_id=? AND s.selected=1)";args.push(String(session?.id??""));}
+    if(filter==="unselected"){where+=" AND NOT EXISTS (SELECT 1 FROM image_selections s WHERE s.image_id=i.id AND s.session_id=? AND s.selected=1)";args.push(String(session?.id??""));}
+    if(filter==="noted"){where+=" AND EXISTS (SELECT 1 FROM image_selections s WHERE s.image_id=i.id AND s.session_id=? AND LENGTH(TRIM(s.note))>0)";args.push(String(session?.id??""));}
     const total=await database.prepare(`SELECT COUNT(*) AS count FROM images i WHERE ${where}`).bind(...args).first<{count:number}>();
-    const images=await database.prepare(`SELECT i.id,i.file_name AS fileName,i.mime_type AS mimeType,i.thumbnail_url AS thumbnailUrl,i.preview_url AS previewUrl,i.drive_url AS driveUrl,s.selected,s.note,s.selected_at AS selectedAt FROM images i LEFT JOIN image_selections s ON s.image_id=i.id AND s.session_id=? WHERE ${where} ORDER BY i.file_name LIMIT 30 OFFSET ?`).bind(session.id,...args,offset).all();
-    const selectedCount=await database.prepare("SELECT COUNT(*) AS count FROM image_selections WHERE session_id=? AND selected=1").bind(session.id).first<{count:number}>();
+    const images=await database.prepare(`SELECT i.id,i.file_name AS fileName,i.mime_type AS mimeType,i.thumbnail_url AS thumbnailUrl,i.preview_url AS previewUrl,CASE WHEN ? = 1 THEN i.drive_url ELSE NULL END AS driveUrl,s.selected,s.note,s.selected_at AS selectedAt FROM images i LEFT JOIN image_selections s ON s.image_id=i.id AND s.session_id=? WHERE ${where} ORDER BY i.file_name LIMIT 30 OFFSET ?`).bind(Number(Boolean(user)),session?.id??"",...args,offset).all();
+    const selectedCount=session?await database.prepare("SELECT COUNT(*) AS count FROM image_selections WHERE session_id=? AND selected=1").bind(session.id).first<{count:number}>():{count:0};
     const allCount=await database.prepare("SELECT COUNT(*) AS count FROM images WHERE album_id=? AND status='ACTIVE'").bind(path[1]).first<{count:number}>();
-    return json({album,session,images:images.results,total:total?.count??0,allCount:allCount?.count??0,selectedCount:selectedCount?.count??0,hasMore:offset+images.results.length<(total?.count??0)});
+    const visibleAlbum=user?album:{...album,driveFolderId:null,driveFolderUrl:null};
+    return json({album:visibleAlbum,session:session??{id:"",status:"DRAFT",submittedAt:null},images:images.results,total:total?.count??0,allCount:allCount?.count??0,selectedCount:selectedCount?.count??0,hasMore:offset+images.results.length<(total?.count??0),canSelect:Boolean(user)});
   }
   if(request.method==="GET" && section==="albums" && path[1] && !path[2]) {
     requireAdmin(user);
@@ -59,12 +63,12 @@ async function handle(request:NextRequest, context:Context) {
     if(input.id) {
       const existing=await getAlbum(id);
       if(existing.status==="ARCHIVED") throw new ApiError(409,"Không thể sửa album đã lưu trữ.");
-      await database.prepare("UPDATE albums SET name=?,description=?,drive_folder_id=?,drive_folder_url=?,min_selection=?,max_selection=?,allow_note=?,allow_edit_after_submit=?,start_date=?,end_date=?,status=?,updated_at=? WHERE id=?")
-        .bind(input.name,input.description,folderId,input.driveFolderUrl||null,input.minSelection,input.maxSelection,Number(input.allowNote),Number(input.allowEditAfterSubmit),input.startDate||null,input.endDate||null,input.status,stamp,id).run();
+      await database.prepare("UPDATE albums SET name=?,description=?,drive_folder_id=?,drive_folder_url=?,min_selection=?,max_selection=?,allow_note=?,allow_edit_after_submit=?,visibility=?,start_date=?,end_date=?,status=?,updated_at=? WHERE id=?")
+        .bind(input.name,input.description,folderId,input.driveFolderUrl||null,input.minSelection,input.maxSelection,Number(input.allowNote),Number(input.allowEditAfterSubmit),input.visibility,input.startDate||null,input.endDate||null,input.status,stamp,id).run();
       await audit(user.id,id,"ALBUM_UPDATED",{name:input.name,status:input.status});
     } else {
-      await database.prepare("INSERT INTO albums (id,name,description,drive_folder_id,drive_folder_url,min_selection,max_selection,allow_note,allow_edit_after_submit,start_date,end_date,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
-        .bind(id,input.name,input.description,folderId,input.driveFolderUrl||null,input.minSelection,input.maxSelection,Number(input.allowNote),Number(input.allowEditAfterSubmit),input.startDate||null,input.endDate||null,input.status,stamp,stamp).run();
+      await database.prepare("INSERT INTO albums (id,name,description,drive_folder_id,drive_folder_url,min_selection,max_selection,allow_note,allow_edit_after_submit,visibility,start_date,end_date,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+        .bind(id,input.name,input.description,folderId,input.driveFolderUrl||null,input.minSelection,input.maxSelection,Number(input.allowNote),Number(input.allowEditAfterSubmit),input.visibility,input.startDate||null,input.endDate||null,input.status,stamp,stamp).run();
       await audit(user.id,id,"ALBUM_CREATED",{name:input.name});
     }
     return json({id});
@@ -100,10 +104,11 @@ async function handle(request:NextRequest, context:Context) {
     return json({added,updated,unchanged,removed,lastSyncAt:stamp});
   }
   if(request.method==="POST" && section==="selection") {
+    const actor=requireUser(user);
     const input=z.object({albumId:z.string(),imageId:z.string(),selected:z.boolean().optional(),note:z.string().max(2000).optional()}).parse(await request.json());
     if(input.selected===undefined && input.note===undefined) throw new ApiError(400,"Không có thay đổi để lưu.");
     const album=await getAlbum(input.albumId);
-    const session=await getOrCreateSession(input.albumId,user.id);
+    const session=await getOrCreateSession(input.albumId,actor.id);
     canEdit(album,session);
     const image=await database.prepare("SELECT id FROM images WHERE id=? AND album_id=? AND status='ACTIVE'").bind(input.imageId,input.albumId).first();
     if(!image) throw new ApiError(404,"Không tìm thấy ảnh trong album.");
@@ -119,14 +124,27 @@ async function handle(request:NextRequest, context:Context) {
     await database.prepare("INSERT INTO image_selections (id,session_id,image_id,selected,note,selected_at,updated_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(session_id,image_id) DO UPDATE SET selected=excluded.selected,note=excluded.note,selected_at=excluded.selected_at,updated_at=excluded.updated_at")
       .bind(uid(),session.id,input.imageId,Number(selected),note,selectedAt,now()).run();
     await database.prepare("UPDATE selection_sessions SET status='DRAFT',submitted_at=NULL,updated_at=? WHERE id=?").bind(now(),session.id).run();
-    await audit(user.id,input.albumId,input.note!==undefined?"NOTE_SAVED":"SELECTION_CHANGED",{imageId:input.imageId,selected});
+    await audit(actor.id,input.albumId,input.note!==undefined?"NOTE_SAVED":"SELECTION_CHANGED",{imageId:input.imageId,selected});
     const count=await database.prepare("SELECT COUNT(*) AS count FROM image_selections WHERE session_id=? AND selected=1").bind(session.id).first<{count:number}>();
     return json({selected,note,selectedAt,selectedCount:count?.count??0,sessionStatus:"DRAFT"});
   }
+  if(request.method==="POST" && section==="reselect") {
+    const {albumId}=z.object({albumId:z.string()}).parse(await request.json());
+    const actor=requireUser(user);
+    const album=await getAlbum(albumId);
+    if(album.status!=="ACTIVE") throw new ApiError(409,"Album hiện không nhận lựa chọn.");
+    const session=await getOrCreateSession(albumId,actor.id);
+    if(session.status!=="SUBMITTED") throw new ApiError(409,"Lựa chọn chưa được gửi.");
+    const stamp=now();
+    await database.prepare("UPDATE selection_sessions SET status='DRAFT',submitted_at=NULL,updated_at=? WHERE id=?").bind(stamp,session.id).run();
+    await audit(actor.id,albumId,"SELECTION_REOPENED",{});
+    return json({status:"DRAFT"});
+  }
   if(request.method==="POST" && section==="submit") {
+    const actor=requireUser(user);
     const {albumId}=z.object({albumId:z.string()}).parse(await request.json());
     const album=await getAlbum(albumId);
-    const session=await getOrCreateSession(albumId,user.id);
+    const session=await getOrCreateSession(albumId,actor.id);
     canEdit(album,session);
     const count=await database.prepare("SELECT COUNT(*) AS count FROM image_selections WHERE session_id=? AND selected=1").bind(session.id).first<{count:number}>();
     const selectedCount=count?.count??0;
@@ -134,7 +152,7 @@ async function handle(request:NextRequest, context:Context) {
     if(album.maxSelection!==null && selectedCount>Number(album.maxSelection)) throw new ApiError(409,`Bạn chỉ được chọn tối đa ${album.maxSelection} ảnh.`);
     const stamp=now();
     await database.prepare("UPDATE selection_sessions SET status='SUBMITTED',submitted_at=?,updated_at=? WHERE id=?").bind(stamp,stamp,session.id).run();
-    await audit(user.id,albumId,"SELECTION_SUBMITTED",{selectedCount});
+    await audit(actor.id,albumId,"SELECTION_SUBMITTED",{selectedCount});
     return json({submittedAt:stamp,selectedCount});
   }
   if(request.method==="GET" && section==="results" && !path[1]) {
@@ -159,7 +177,7 @@ async function handle(request:NextRequest, context:Context) {
     requireAdmin(user);
     const {env}=await import("cloudflare:workers");
     const method=env.GOOGLE_SERVICE_ACCOUNT_EMAIL&&env.GOOGLE_PRIVATE_KEY?"Tài khoản dịch vụ":env.DRIVE_API_KEY?"API key":"Chưa có";
-    return json({driveConfigured:method!=="Chưa có",method});
+    return json({driveConfigured:method!=="Chưa có",method,googleAuthConfigured:Boolean(env.GOOGLE_OAUTH_CLIENT_ID&&env.GOOGLE_OAUTH_CLIENT_SECRET&&env.AUTH_SESSION_SECRET)});
   }
   if(request.method==="GET" && section==="export") {
     requireAdmin(user);
@@ -170,8 +188,8 @@ async function handle(request:NextRequest, context:Context) {
     return new NextResponse(new Uint8Array(content).buffer,{headers:{"Content-Type":"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet","Content-Disposition":"attachment; filename=chon-anh-ket-qua.xlsx"}});
   }
   if(request.method==="GET" && section==="image" && path[1]) {
-    const image=await database.prepare("SELECT i.id,i.drive_file_id AS driveFileId,i.drive_thumbnail_link AS driveThumbnailLink,i.mime_type AS mimeType,a.status AS albumStatus FROM images i JOIN albums a ON a.id=i.album_id WHERE i.drive_file_id=? AND i.status='ACTIVE'").bind(path[1]).first<{id:string;driveFileId:string;driveThumbnailLink:string|null;mimeType:string;albumStatus:string}>();
-    if(!image || (image.albumStatus!=="ACTIVE" && user.role!=="ADMIN")) throw new ApiError(404,"Không tìm thấy ảnh.");
+    const image=await database.prepare("SELECT i.id,i.drive_file_id AS driveFileId,i.drive_thumbnail_link AS driveThumbnailLink,i.mime_type AS mimeType,a.status AS albumStatus,a.visibility FROM images i JOIN albums a ON a.id=i.album_id WHERE i.drive_file_id=? AND i.status='ACTIVE'").bind(path[1]).first<{id:string;driveFileId:string;driveThumbnailLink:string|null;mimeType:string;albumStatus:string;visibility:string}>();
+    if(!image || (image.albumStatus!=="ACTIVE" && user?.role!=="ADMIN") || (!user&&image.visibility!=="PUBLIC")) throw new ApiError(404,"Không tìm thấy ảnh.");
     const thumbnail=url.searchParams.get("size")==="thumb";
     const fetched=thumbnail?await fetchDriveThumbnail(path[1],image.driveThumbnailLink):{response:await fetchDriveImage(path[1]),link:image.driveThumbnailLink};
     if(thumbnail&&fetched.link!==image.driveThumbnailLink) await database.prepare("UPDATE images SET drive_thumbnail_link=? WHERE id=?").bind(fetched.link,image.id).run();

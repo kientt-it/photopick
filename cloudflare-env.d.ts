@@ -5,5 +5,9 @@ declare namespace Cloudflare {
     DRIVE_API_KEY?: string;
     GOOGLE_SERVICE_ACCOUNT_EMAIL?: string;
     GOOGLE_PRIVATE_KEY?: string;
+    GOOGLE_OAUTH_CLIENT_ID?: string;
+    GOOGLE_OAUTH_CLIENT_SECRET?: string;
+    AUTH_SESSION_SECRET?: string;
+    ADMIN_EMAILS?: string;
   }
 }
