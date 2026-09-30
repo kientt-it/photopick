@@ -15,8 +15,8 @@ CREATE TABLE `albums` (
 	`created_at` text NOT NULL,
 	`updated_at` text NOT NULL
 );
---> statement-breakpoint
-CREATE INDEX `idx_albums_status` ON `albums` (`status`);--> statement-breakpoint
+
+CREATE INDEX `idx_albums_status` ON `albums` (`status`);
 CREATE TABLE `audit_events` (
 	`id` text PRIMARY KEY NOT NULL,
 	`actor_id` text NOT NULL,
@@ -25,8 +25,8 @@ CREATE TABLE `audit_events` (
 	`details` text DEFAULT '{}' NOT NULL,
 	`created_at` text NOT NULL
 );
---> statement-breakpoint
-CREATE INDEX `idx_audit_album_created` ON `audit_events` (`album_id`,`created_at`);--> statement-breakpoint
+
+CREATE INDEX `idx_audit_album_created` ON `audit_events` (`album_id`,`created_at`);
 CREATE TABLE `image_selections` (
 	`id` text PRIMARY KEY NOT NULL,
 	`session_id` text NOT NULL,
@@ -38,9 +38,9 @@ CREATE TABLE `image_selections` (
 	FOREIGN KEY (`session_id`) REFERENCES `selection_sessions`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`image_id`) REFERENCES `images`(`id`) ON UPDATE no action ON DELETE no action
 );
---> statement-breakpoint
-CREATE UNIQUE INDEX `idx_selection_session_image` ON `image_selections` (`session_id`,`image_id`);--> statement-breakpoint
-CREATE INDEX `idx_selection_selected` ON `image_selections` (`session_id`,`selected`);--> statement-breakpoint
+
+CREATE UNIQUE INDEX `idx_selection_session_image` ON `image_selections` (`session_id`,`image_id`);
+CREATE INDEX `idx_selection_selected` ON `image_selections` (`session_id`,`selected`);
 CREATE TABLE `images` (
 	`id` text PRIMARY KEY NOT NULL,
 	`album_id` text NOT NULL,
@@ -56,9 +56,9 @@ CREATE TABLE `images` (
 	`updated_at` text NOT NULL,
 	FOREIGN KEY (`album_id`) REFERENCES `albums`(`id`) ON UPDATE no action ON DELETE no action
 );
---> statement-breakpoint
-CREATE UNIQUE INDEX `idx_images_album_drive_file` ON `images` (`album_id`,`drive_file_id`);--> statement-breakpoint
-CREATE INDEX `idx_images_album_status` ON `images` (`album_id`,`status`);--> statement-breakpoint
+
+CREATE UNIQUE INDEX `idx_images_album_drive_file` ON `images` (`album_id`,`drive_file_id`);
+CREATE INDEX `idx_images_album_status` ON `images` (`album_id`,`status`);
 CREATE TABLE `selection_sessions` (
 	`id` text PRIMARY KEY NOT NULL,
 	`album_id` text NOT NULL,
@@ -70,9 +70,9 @@ CREATE TABLE `selection_sessions` (
 	FOREIGN KEY (`album_id`) REFERENCES `albums`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action
 );
---> statement-breakpoint
-CREATE UNIQUE INDEX `idx_sessions_album_user` ON `selection_sessions` (`album_id`,`user_id`);--> statement-breakpoint
-CREATE INDEX `idx_sessions_status` ON `selection_sessions` (`status`);--> statement-breakpoint
+
+CREATE UNIQUE INDEX `idx_sessions_album_user` ON `selection_sessions` (`album_id`,`user_id`);
+CREATE INDEX `idx_sessions_status` ON `selection_sessions` (`status`);
 CREATE TABLE `users` (
 	`id` text PRIMARY KEY NOT NULL,
 	`email` text NOT NULL,
@@ -80,5 +80,5 @@ CREATE TABLE `users` (
 	`role` text DEFAULT 'USER' NOT NULL,
 	`created_at` text NOT NULL
 );
---> statement-breakpoint
+
 CREATE UNIQUE INDEX `idx_users_email` ON `users` (`email`);
