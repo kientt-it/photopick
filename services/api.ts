@@ -1,4 +1,4 @@
-import type {Album,AlbumData,DiscoveryPhoto,Result,User} from "@/types";
+import type {Album,AlbumData,DiscoveryPhoto,LibraryData,Photo,Result,User} from "@/types";
 
 async function request<T>(path:string, options?:RequestInit):Promise<T>{
   const response=await fetch(`/api/${path}`,{...options,headers:{"Content-Type":"application/json",...options?.headers},cache:"no-store"});
@@ -8,6 +8,8 @@ async function request<T>(path:string, options?:RequestInit):Promise<T>{
 const post=<T>(path:string,value:unknown)=>request<T>(path,{method:"POST",body:JSON.stringify(value)});
 export const api={
   bootstrap:()=>request<{user:User|null;albums:Album[];featuredImages:DiscoveryPhoto[];stats:Record<string,number>|null}>("bootstrap"),
+  library:(search:string,favorites:boolean,offset:number)=>request<LibraryData>(`library?search=${encodeURIComponent(search)}&favorites=${favorites?"1":"0"}&offset=${offset}`),
+  favorite:(imageId:string,favorite:boolean)=>post<{favorite:boolean}>("favorite",{imageId,favorite}),
   album:(id:string,filter:string,search:string,offset:number)=>request<AlbumData>(`album/${encodeURIComponent(id)}?filter=${encodeURIComponent(filter)}&search=${encodeURIComponent(search)}&offset=${offset}`),
   photo:(id:string)=>request<{photo:Photo;albumId:string;albumName:string}>(`photo/${encodeURIComponent(id)}`),
   albumConfig:(id:string)=>request<{album:Album}>(`albums/${encodeURIComponent(id)}`),

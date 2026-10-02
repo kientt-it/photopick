@@ -16,6 +16,9 @@ export async function ensureCurrentSchema(database=db()) {
       try{await database.prepare("ALTER TABLE albums ADD COLUMN visibility TEXT NOT NULL DEFAULT 'PRIVATE'").run();}
       catch(error){const refreshed=await database.prepare("PRAGMA table_info(albums)").all<{name:string}>();if(!refreshed.results.some(column=>column.name==="visibility"))throw error;}
     }
+    await database.prepare("CREATE TABLE IF NOT EXISTS image_favorites (id TEXT PRIMARY KEY NOT NULL,user_id TEXT NOT NULL,image_id TEXT NOT NULL,created_at TEXT NOT NULL,FOREIGN KEY (user_id) REFERENCES users(id),FOREIGN KEY (image_id) REFERENCES images(id))").run();
+    await database.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_favorites_user_image ON image_favorites (user_id,image_id)").run();
+    await database.prepare("CREATE INDEX IF NOT EXISTS idx_favorites_user_created ON image_favorites (user_id,created_at)").run();
   })().catch(error=>{schemaCheck=null;throw error;});
   await schemaCheck;
 }

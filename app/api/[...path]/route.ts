@@ -31,12 +31,25 @@ async function handle(request:NextRequest, context:Context) {
     const stats=user?.role==="ADMIN"?await database.prepare("SELECT (SELECT COUNT(*) FROM albums) AS totalAlbums,(SELECT COUNT(*) FROM albums WHERE status='ACTIVE') AS activeAlbums,(SELECT COUNT(*) FROM images WHERE status='ACTIVE') AS totalImages,(SELECT COUNT(*) FROM image_selections WHERE selected=1) AS totalSelected,(SELECT COUNT(*) FROM selection_sessions WHERE status='SUBMITTED') AS completeUsers,(SELECT COUNT(*) FROM selection_sessions WHERE status='DRAFT') AS pendingUsers").first():null;
     return json({user,albums:visible,featuredImages:featuredImages.results,stats});
   }
+  if(request.method==="GET" && section==="library") {
+    const search=(url.searchParams.get("search")??"").trim().slice(0,100);
+    const favorites=url.searchParams.get("favorites")==="1";
+    const offset=Math.max(0,Math.min(100000,Number(url.searchParams.get("offset")??0)||0));
+    if(favorites&&!user) throw new ApiError(401,"Đăng nhập bằng Google để xem ảnh yêu thích.");
+    let where="i.status='ACTIVE' AND a.status='ACTIVE' AND (? = 1 OR a.visibility='PUBLIC')";
+    const args:(string|number)[]=[Number(Boolean(user))];
+    if(search){where+=" AND (i.file_name LIKE ? OR a.name LIKE ?)";args.push(`%${search}%`,`%${search}%`);}
+    if(favorites){where+=" AND EXISTS (SELECT 1 FROM image_favorites fx WHERE fx.image_id=i.id AND fx.user_id=?)";args.push(user!.id);}
+    const total=await database.prepare(`SELECT COUNT(*) AS count FROM images i JOIN albums a ON a.id=i.album_id WHERE ${where}`).bind(...args).first<{count:number}>();
+    const images=await database.prepare(`SELECT i.id,i.album_id AS albumId,a.name AS albumName,i.file_name AS fileName,i.thumbnail_url AS thumbnailUrl,i.preview_url AS previewUrl,CASE WHEN ? = 1 THEN i.drive_url ELSE NULL END AS driveUrl,CASE WHEN f.image_id IS NULL THEN 0 ELSE 1 END AS favorite,i.created_at AS createdAt FROM images i JOIN albums a ON a.id=i.album_id LEFT JOIN image_favorites f ON f.image_id=i.id AND f.user_id=? WHERE ${where} ORDER BY i.created_at DESC,i.file_name LIMIT 60 OFFSET ?`).bind(Number(Boolean(user)),user?.id??"",...args,offset).all();
+    return json({images:images.results,total:total?.count??0,hasMore:offset+images.results.length<(total?.count??0)});
+  }
   if(request.method==="GET" && section==="photo" && path[1]) {
-    const photo=await database.prepare("SELECT i.id,i.album_id AS albumId,i.file_name AS fileName,i.mime_type AS mimeType,i.thumbnail_url AS thumbnailUrl,i.preview_url AS previewUrl,i.drive_url AS driveUrl,a.name AS albumName,a.status AS albumStatus,a.visibility FROM images i JOIN albums a ON a.id=i.album_id WHERE i.id=? AND i.status='ACTIVE'").bind(path[1]).first<{id:string;albumId:string;fileName:string;mimeType:string;thumbnailUrl:string;previewUrl:string;driveUrl:string|null;albumName:string;albumStatus:string;visibility:string}>();
+    const photo=await database.prepare("SELECT i.id,i.album_id AS albumId,i.file_name AS fileName,i.mime_type AS mimeType,i.thumbnail_url AS thumbnailUrl,i.preview_url AS previewUrl,i.drive_url AS driveUrl,a.name AS albumName,a.status AS albumStatus,a.visibility,(SELECT COUNT(*) FROM image_favorites f WHERE f.image_id=i.id AND f.user_id=?) AS favorite FROM images i JOIN albums a ON a.id=i.album_id WHERE i.id=? AND i.status='ACTIVE'").bind(user?.id??"",path[1]).first<{id:string;albumId:string;fileName:string;mimeType:string;thumbnailUrl:string;previewUrl:string;driveUrl:string|null;albumName:string;albumStatus:string;visibility:string;favorite:number}>();
     if(!photo || (user?.role!=="ADMIN"&&photo.albumStatus!=="ACTIVE") || (!user&&photo.visibility!=="PUBLIC")) throw new ApiError(404,"Không tìm thấy ảnh.");
     const session=user?await getOrCreateSession(photo.albumId,user.id):null;
     const selection=session?await database.prepare("SELECT selected,note,selected_at AS selectedAt FROM image_selections WHERE image_id=? AND session_id=?").bind(photo.id,session.id).first<{selected:number;note:string;selectedAt:string|null}>():null;
-    const visiblePhoto={id:photo.id,albumId:photo.albumId,fileName:photo.fileName,mimeType:photo.mimeType,thumbnailUrl:photo.thumbnailUrl,previewUrl:photo.previewUrl,driveUrl:user?photo.driveUrl:null};
+    const visiblePhoto={id:photo.id,albumId:photo.albumId,fileName:photo.fileName,mimeType:photo.mimeType,thumbnailUrl:photo.thumbnailUrl,previewUrl:photo.previewUrl,driveUrl:user?photo.driveUrl:null,favorite:Boolean(photo.favorite)};
     return json({photo:{...visiblePhoto,selected:selection?.selected??0,note:selection?.note??null,selectedAt:selection?.selectedAt??null},albumId:photo.albumId,albumName:photo.albumName});
   }
   if(request.method==="GET" && section==="album" && path[1]) {
@@ -54,7 +67,7 @@ async function handle(request:NextRequest, context:Context) {
     if(filter==="unselected"){where+=" AND NOT EXISTS (SELECT 1 FROM image_selections s WHERE s.image_id=i.id AND s.session_id=? AND s.selected=1)";args.push(String(session?.id??""));}
     if(filter==="noted"){where+=" AND EXISTS (SELECT 1 FROM image_selections s WHERE s.image_id=i.id AND s.session_id=? AND LENGTH(TRIM(s.note))>0)";args.push(String(session?.id??""));}
     const total=await database.prepare(`SELECT COUNT(*) AS count FROM images i WHERE ${where}`).bind(...args).first<{count:number}>();
-    const images=await database.prepare(`SELECT i.id,i.file_name AS fileName,i.mime_type AS mimeType,i.thumbnail_url AS thumbnailUrl,i.preview_url AS previewUrl,CASE WHEN ? = 1 THEN i.drive_url ELSE NULL END AS driveUrl,s.selected,s.note,s.selected_at AS selectedAt FROM images i LEFT JOIN image_selections s ON s.image_id=i.id AND s.session_id=? WHERE ${where} ORDER BY i.file_name LIMIT 30 OFFSET ?`).bind(Number(Boolean(user)),session?.id??"",...args,offset).all();
+    const images=await database.prepare(`SELECT i.id,i.file_name AS fileName,i.mime_type AS mimeType,i.thumbnail_url AS thumbnailUrl,i.preview_url AS previewUrl,CASE WHEN ? = 1 THEN i.drive_url ELSE NULL END AS driveUrl,s.selected,s.note,s.selected_at AS selectedAt,CASE WHEN f.image_id IS NULL THEN 0 ELSE 1 END AS favorite FROM images i LEFT JOIN image_selections s ON s.image_id=i.id AND s.session_id=? LEFT JOIN image_favorites f ON f.image_id=i.id AND f.user_id=? WHERE ${where} ORDER BY i.file_name LIMIT 30 OFFSET ?`).bind(Number(Boolean(user)),session?.id??"",user?.id??"",...args,offset).all();
     const selectedCount=session?await database.prepare("SELECT COUNT(*) AS count FROM image_selections WHERE session_id=? AND selected=1").bind(session.id).first<{count:number}>():{count:0};
     const allCount=await database.prepare("SELECT COUNT(*) AS count FROM images WHERE album_id=? AND status='ACTIVE'").bind(path[1]).first<{count:number}>();
     const visibleAlbum=user?album:{...album,driveFolderId:null,driveFolderUrl:null};
@@ -111,6 +124,15 @@ async function handle(request:NextRequest, context:Context) {
     await database.prepare("UPDATE albums SET last_sync_at=?,updated_at=? WHERE id=?").bind(stamp,stamp,path[1]).run();
     await audit(user.id,path[1],"DRIVE_SYNC",{added,updated,unchanged,removed});
     return json({added,updated,unchanged,removed,lastSyncAt:stamp});
+  }
+  if(request.method==="POST" && section==="favorite") {
+    const actor=requireUser(user);
+    const input=z.object({imageId:z.string(),favorite:z.boolean()}).parse(await request.json());
+    const image=await database.prepare("SELECT i.id FROM images i JOIN albums a ON a.id=i.album_id WHERE i.id=? AND i.status='ACTIVE' AND a.status='ACTIVE'").bind(input.imageId).first();
+    if(!image) throw new ApiError(404,"Không tìm thấy ảnh.");
+    if(input.favorite) await database.prepare("INSERT OR IGNORE INTO image_favorites (id,user_id,image_id,created_at) VALUES (?,?,?,?)").bind(uid(),actor.id,input.imageId,now()).run();
+    else await database.prepare("DELETE FROM image_favorites WHERE user_id=? AND image_id=?").bind(actor.id,input.imageId).run();
+    return json({favorite:input.favorite});
   }
   if(request.method==="POST" && section==="selection") {
     const actor=requireUser(user);

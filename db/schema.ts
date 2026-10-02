@@ -63,6 +63,13 @@ export const imageSelections = sqliteTable("image_selections", {
   updatedAt: text("updated_at").notNull(),
 }, (t) => [uniqueIndex("idx_selection_session_image").on(t.sessionId,t.imageId),index("idx_selection_selected").on(t.sessionId,t.selected)]);
 
+export const imageFavorites = sqliteTable("image_favorites", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id),
+  imageId: text("image_id").notNull().references(() => images.id),
+  createdAt: text("created_at").notNull(),
+}, (t) => [uniqueIndex("idx_favorites_user_image").on(t.userId,t.imageId),index("idx_favorites_user_created").on(t.userId,t.createdAt)]);
+
 export const auditEvents = sqliteTable("audit_events", {
   id: text("id").primaryKey(),
   actorId: text("actor_id").notNull(),
