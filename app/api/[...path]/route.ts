@@ -27,8 +27,17 @@ async function handle(request:NextRequest, context:Context) {
   if(request.method==="GET" && section==="bootstrap") {
     const albums=await database.prepare("SELECT a.id,a.name,a.description,a.status,a.visibility,a.visibility='PUBLIC' AS isPublic,CASE WHEN ? = 1 THEN a.drive_folder_url ELSE NULL END AS driveFolderUrl,a.min_selection AS minSelection,a.max_selection AS maxSelection,a.last_sync_at AS lastSyncAt,(SELECT x.thumbnail_url FROM images x WHERE x.album_id=a.id AND x.status='ACTIVE' ORDER BY x.created_at,x.file_name LIMIT 1) AS coverUrl,COUNT(i.id) AS imageCount FROM albums a LEFT JOIN images i ON i.album_id=a.id AND i.status='ACTIVE' GROUP BY a.id ORDER BY a.created_at DESC").bind(Number(user?.role==="ADMIN")).all();
     const visible=user?.role==="ADMIN"?albums.results:albums.results.filter((a:Record<string,unknown>)=>a.status==="ACTIVE"&&(user||a.isPublic));
+    const featuredImages=await database.prepare("SELECT i.id,i.album_id AS albumId,a.name AS albumName,i.file_name AS fileName,i.thumbnail_url AS thumbnailUrl FROM images i JOIN albums a ON a.id=i.album_id WHERE i.status='ACTIVE' AND a.status='ACTIVE' AND a.visibility='PUBLIC' ORDER BY i.created_at DESC,i.file_name LIMIT 36").all();
     const stats=user?.role==="ADMIN"?await database.prepare("SELECT (SELECT COUNT(*) FROM albums) AS totalAlbums,(SELECT COUNT(*) FROM albums WHERE status='ACTIVE') AS activeAlbums,(SELECT COUNT(*) FROM images WHERE status='ACTIVE') AS totalImages,(SELECT COUNT(*) FROM image_selections WHERE selected=1) AS totalSelected,(SELECT COUNT(*) FROM selection_sessions WHERE status='SUBMITTED') AS completeUsers,(SELECT COUNT(*) FROM selection_sessions WHERE status='DRAFT') AS pendingUsers").first():null;
-    return json({user,albums:visible,stats});
+    return json({user,albums:visible,featuredImages:featuredImages.results,stats});
+  }
+  if(request.method==="GET" && section==="photo" && path[1]) {
+    const photo=await database.prepare("SELECT i.id,i.album_id AS albumId,i.file_name AS fileName,i.mime_type AS mimeType,i.thumbnail_url AS thumbnailUrl,i.preview_url AS previewUrl,i.drive_url AS driveUrl,a.name AS albumName,a.status AS albumStatus,a.visibility FROM images i JOIN albums a ON a.id=i.album_id WHERE i.id=? AND i.status='ACTIVE'").bind(path[1]).first<{id:string;albumId:string;fileName:string;mimeType:string;thumbnailUrl:string;previewUrl:string;driveUrl:string|null;albumName:string;albumStatus:string;visibility:string}>();
+    if(!photo || (user?.role!=="ADMIN"&&photo.albumStatus!=="ACTIVE") || (!user&&photo.visibility!=="PUBLIC")) throw new ApiError(404,"Không tìm thấy ảnh.");
+    const session=user?await getOrCreateSession(photo.albumId,user.id):null;
+    const selection=session?await database.prepare("SELECT selected,note,selected_at AS selectedAt FROM image_selections WHERE image_id=? AND session_id=?").bind(photo.id,session.id).first<{selected:number;note:string;selectedAt:string|null}>():null;
+    const visiblePhoto={id:photo.id,albumId:photo.albumId,fileName:photo.fileName,mimeType:photo.mimeType,thumbnailUrl:photo.thumbnailUrl,previewUrl:photo.previewUrl,driveUrl:user?photo.driveUrl:null};
+    return json({photo:{...visiblePhoto,selected:selection?.selected??0,note:selection?.note??null,selectedAt:selection?.selectedAt??null},albumId:photo.albumId,albumName:photo.albumName});
   }
   if(request.method==="GET" && section==="album" && path[1]) {
     const album=await getAlbum(path[1]);

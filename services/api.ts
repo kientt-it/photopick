@@ -1,4 +1,4 @@
-import type {Album,AlbumData,Result,User} from "@/types";
+import type {Album,AlbumData,DiscoveryPhoto,Result,User} from "@/types";
 
 async function request<T>(path:string, options?:RequestInit):Promise<T>{
   const response=await fetch(`/api/${path}`,{...options,headers:{"Content-Type":"application/json",...options?.headers},cache:"no-store"});
@@ -7,8 +7,9 @@ async function request<T>(path:string, options?:RequestInit):Promise<T>{
 }
 const post=<T>(path:string,value:unknown)=>request<T>(path,{method:"POST",body:JSON.stringify(value)});
 export const api={
-  bootstrap:()=>request<{user:User|null;albums:Album[];stats:Record<string,number>|null}>("bootstrap"),
+  bootstrap:()=>request<{user:User|null;albums:Album[];featuredImages:DiscoveryPhoto[];stats:Record<string,number>|null}>("bootstrap"),
   album:(id:string,filter:string,search:string,offset:number)=>request<AlbumData>(`album/${encodeURIComponent(id)}?filter=${encodeURIComponent(filter)}&search=${encodeURIComponent(search)}&offset=${offset}`),
+  photo:(id:string)=>request<{photo:Photo;albumId:string;albumName:string}>(`photo/${encodeURIComponent(id)}`),
   albumConfig:(id:string)=>request<{album:Album}>(`albums/${encodeURIComponent(id)}`),
   selection:(value:{albumId:string;imageId:string;selected?:boolean;note?:string})=>post<{selected:boolean;note:string;selectedAt:string|null;selectedCount:number;sessionStatus:string}>("selection",value),
   submit:(albumId:string)=>post<{submittedAt:string;selectedCount:number}>("submit",{albumId}),
