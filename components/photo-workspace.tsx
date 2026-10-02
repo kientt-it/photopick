@@ -1,7 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import Link from "next/link";
 import { ArrowLeft, Check, ChevronLeft, ChevronRight, Expand, ImageOff, Maximize2, Minus, Plus, Search, Share2, StickyNote, X } from "lucide-react";
 import { api } from "@/services/api";
 import type {AlbumData,Photo} from "@/types";
@@ -92,7 +91,7 @@ export function PhotoWorkspace({albumId,selectedView=false}:{albumId:string;sele
   const submit=async()=>{if(!data)return;setSubmitting(true);setFlash("");try{const result=await api.submit(albumId);setData({...data,session:{...data.session,status:"SUBMITTED",submittedAt:result.submittedAt}});setConfirm(false);setFlash(`Đã xác nhận lựa chọn vào ${new Date(result.submittedAt).toLocaleString("vi-VN")}.`);}catch(error){setFlash(error instanceof Error?error.message:"Không xác nhận được lựa chọn.");setConfirm(false);}finally{setSubmitting(false);}};
   const reselect=async()=>{setReselecting(true);setFlash("");try{await api.reselect(albumId);setData(current=>current?{...current,session:{...current.session,status:"DRAFT",submittedAt:null}}:current);setFlash("Bạn có thể chọn lại ảnh rồi gửi lại danh sách.");}catch(error){setFlash(error instanceof Error?error.message:"Không mở lại được lựa chọn.");}finally{setReselecting(false);}};
   const photo=data?.images.find(item=>item.id===previewId)??null;
-  return <div className="content-page"><div className="breadcrumb"><Link href="/albums">Album ảnh</Link><ChevronRight size={14}/><span>{data?.album.name??"Đang tải"}</span></div>
+  return <div className="content-page"><div className="breadcrumb"><a href="/albums">Album ảnh</a><ChevronRight size={14}/><span>{data?.album.name??"Đang tải"}</span></div>
     {loading?<div className="loading-panel"><div className="skeleton title"/><div className="skeleton bar"/><div className="skeleton-grid">{Array.from({length:8},(_,i)=><div className="skeleton card" key={i}/>)}</div></div>:error?<div className="state-panel"><ImageOff size={30}/><h2>Không thể tải danh sách ảnh</h2><p>{error}</p>{error.includes("Đăng nhập")?<a className="primary-btn" href={`/api/auth/google?return_to=${encodeURIComponent(`/albums/${albumId}`)}`}>Đăng nhập Google</a>:<button className="primary-btn" onClick={refresh}>Vui lòng thử lại</button>}</div>:data&&<>
       <div className="page-heading"><div>{selectedView&&<a className="back-link" href={`/albums/${albumId}`}><ArrowLeft size={16}/> Quay lại chỉnh sửa</a>}<p className="eyebrow">{selectedView?"ẢNH ĐÃ CHỌN":"ALBUM ĐANG DUYỆT"}</p><h1>{selectedView?"Ảnh đã chọn":data.album.name}</h1><p className="lead">{selectedView?`Bạn đã chọn ${data.selectedCount} ảnh trong ${data.album.name}.`:data.album.description}</p></div><div className="album-stat"><strong>{String(data.selectedCount).padStart(2,"0")} <span>/ {data.allCount}</span></strong><small>ảnh đã chọn</small></div></div>
       {flash&&<div className="toast-message" role="status">{flash}<button onClick={()=>setFlash("")} aria-label="Đóng thông báo"><X size={15}/></button></div>}

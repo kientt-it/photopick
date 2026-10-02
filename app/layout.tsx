@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "PhotoPick — Preview & duyệt ảnh",
+  title: "PhotoPick",
   description: "Xem album, chọn và ghi chú ảnh của bạn.",
   icons: {
     icon: "/favicon.svg",
