@@ -68,21 +68,22 @@ export async function fetchDriveImage(fileId:string) {
   return fetch(url,{headers:auth.headers});
 }
 
-function highResolutionThumbnail(link:string) {
+function highResolutionThumbnail(link:string,width:number) {
   // Drive commonly returns a small `s220`/`w220-h220` derivative. Request a
-  // larger derivative so a four-column grid remains sharp on 2x displays.
-  if (/=s\d+/i.test(link)) return link.replace(/=s\d+/i,"=s1200");
-  if (/=w\d+-h\d+/i.test(link)) return link.replace(/=w\d+-h\d+/i,"=w1200-h1200");
+  // sized derivative so each screen gets enough pixels without downloading a
+  // 1200px image on a small phone.
+  if (/=s\d+/i.test(link)) return link.replace(/=s\d+/i,`=s${width}`);
+  if (/=w\d+-h\d+/i.test(link)) return link.replace(/=w\d+-h\d+/i,`=w${width}-h${width}`);
   return link;
 }
 
-export async function fetchDriveThumbnail(fileId:string,storedLink:string|null) {
+export async function fetchDriveThumbnail(fileId:string,storedLink:string|null,width=1200) {
   const auth=await credentials();
-  if(storedLink){const cached=await fetch(highResolutionThumbnail(storedLink),{headers:auth.headers});if(cached.ok)return {response:cached,link:storedLink};}
+  if(storedLink){const cached=await fetch(highResolutionThumbnail(storedLink,width),{headers:auth.headers});if(cached.ok)return {response:cached,link:storedLink};}
   const metadataUrl=new URL(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}`);
   metadataUrl.searchParams.set("fields","thumbnailLink");
   if(auth.key) metadataUrl.searchParams.set("key",auth.key);
   const metadataResponse=await fetch(metadataUrl,{headers:auth.headers});
-  if(metadataResponse.ok){const metadata=await metadataResponse.json() as {thumbnailLink?:string};if(metadata.thumbnailLink){const fresh=await fetch(highResolutionThumbnail(metadata.thumbnailLink),{headers:auth.headers});if(fresh.ok)return {response:fresh,link:metadata.thumbnailLink};}}
+  if(metadataResponse.ok){const metadata=await metadataResponse.json() as {thumbnailLink?:string};if(metadata.thumbnailLink){const fresh=await fetch(highResolutionThumbnail(metadata.thumbnailLink,width),{headers:auth.headers});if(fresh.ok)return {response:fresh,link:metadata.thumbnailLink};}}
   return {response:await fetchDriveImage(fileId),link:storedLink};
 }

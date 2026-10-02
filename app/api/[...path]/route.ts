@@ -107,8 +107,9 @@ async function handle(request:NextRequest, context:Context) {
     const stamp=now();
     for(const file of files){
       const old=byDrive.get(file.id);
-      const thumb=`/api/image/${file.id}?size=thumb`;
-      const full=`/api/image/${file.id}`;
+      const version=encodeURIComponent(file.modifiedTime??stamp);
+      const thumb=`/api/image/${file.id}?size=thumb&v=${version}`;
+      const full=`/api/image/${file.id}?v=${version}`;
       const driveUrl=file.webViewLink??`https://drive.google.com/file/d/${file.id}/view`;
       if(!old){
         await database.prepare("INSERT INTO images (id,album_id,drive_file_id,file_name,mime_type,thumbnail_url,drive_thumbnail_link,preview_url,drive_url,source_modified_at,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)")
@@ -222,11 +223,14 @@ async function handle(request:NextRequest, context:Context) {
     const image=await database.prepare("SELECT i.id,i.drive_file_id AS driveFileId,i.drive_thumbnail_link AS driveThumbnailLink,i.mime_type AS mimeType,a.status AS albumStatus,a.visibility FROM images i JOIN albums a ON a.id=i.album_id WHERE i.drive_file_id=? AND i.status='ACTIVE'").bind(path[1]).first<{id:string;driveFileId:string;driveThumbnailLink:string|null;mimeType:string;albumStatus:string;visibility:string}>();
     if(!image || (image.albumStatus!=="ACTIVE" && user?.role!=="ADMIN") || (!user&&image.visibility!=="PUBLIC")) throw new ApiError(404,"Không tìm thấy ảnh.");
     const thumbnail=url.searchParams.get("size")==="thumb";
-    const fetched=thumbnail?await fetchDriveThumbnail(path[1],image.driveThumbnailLink):{response:await fetchDriveImage(path[1]),link:image.driveThumbnailLink};
+    const requestedWidth=Number(url.searchParams.get("width"));
+    const width=[640,960,1200].includes(requestedWidth)?requestedWidth:1200;
+    const fetched=thumbnail?await fetchDriveThumbnail(path[1],image.driveThumbnailLink,width):{response:await fetchDriveImage(path[1]),link:image.driveThumbnailLink};
     if(thumbnail&&fetched.link!==image.driveThumbnailLink) await database.prepare("UPDATE images SET drive_thumbnail_link=? WHERE id=?").bind(fetched.link,image.id).run();
     const response=fetched.response;
     if(!response.ok || !response.body) throw new ApiError(502,"Không tải được ảnh từ Google Drive.");
-    return new NextResponse(response.body,{headers:{"Content-Type":response.headers.get("content-type")??image.mimeType,"Cache-Control":"private, max-age=3600"}});
+    const cacheControl=image.visibility==="PUBLIC"?"public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400":"private, no-cache";
+    return new NextResponse(response.body,{headers:{"Content-Type":response.headers.get("content-type")??image.mimeType,"Cache-Control":cacheControl}});
   }
   throw new ApiError(404,"Không tìm thấy chức năng.");
 }

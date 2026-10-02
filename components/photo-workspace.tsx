@@ -7,7 +7,13 @@ import type {AlbumData,Photo} from "@/types";
 
 function PhotoImage({src,alt}:{src:string;alt:string}) {
   const [broken,setBroken]=useState(false);
-  return broken?<div className="image-fallback"><ImageOff size={24}/><span>Không tải được ảnh</span></div>:<img src={src} alt={alt} loading="lazy" onError={()=>setBroken(true)}/>;
+  return broken?<div className="image-fallback"><ImageOff size={24}/><span>Không tải được ảnh</span></div>:<img src={src} srcSet={responsiveImageSrcSet(src)} sizes="(max-width:680px) 50vw, (max-width:1180px) 33vw, 25vw" alt={alt} loading="lazy" decoding="async" onError={()=>setBroken(true)}/>;
+}
+
+export function responsiveImageSrcSet(src:string) {
+  if(!src.startsWith("/api/image/")) return undefined;
+  const separator=src.includes("?")?"&":"?";
+  return [640,960,1200].map(width=>`${src}${separator}width=${width} ${width}w`).join(", ");
 }
 
 export function Preview({photo,photos,albumId,albumName,onClose,onNavigate,onToggle,onFavorite,onSaveNote,allowNote=false,locked=false,canSelect=false,showSelection=true}:{photo:Photo;photos:Photo[];albumId:string;albumName:string;onClose:()=>void;onNavigate:(photo:Photo)=>void;onToggle?:(photo:Photo)=>void;onFavorite:(photo:Photo)=>void;onSaveNote?:(photo:Photo,note:string)=>Promise<void>;allowNote?:boolean;locked?:boolean;canSelect?:boolean;showSelection?:boolean}) {
@@ -26,6 +32,7 @@ export function Preview({photo,photos,albumId,albumName,onClose,onNavigate,onTog
   const prev=useCallback(()=>{if(index>0)onNavigate(photos[index-1]);},[index,onNavigate,photos]);
   const next=useCallback(()=>{if(index<photos.length-1)onNavigate(photos[index+1]);},[index,onNavigate,photos]);
   useEffect(()=>{close.current?.focus();},[]);
+  useEffect(()=>{for(const adjacent of [photos[index-1],photos[index+1]]){if(!adjacent?.previewUrl)continue;const preloader=new window.Image();preloader.src=adjacent.previewUrl;}},[index,photos]);
   useEffect(()=>{const bodyOverflow=document.body.style.overflow;const htmlOverflow=document.documentElement.style.overflow;document.body.style.overflow="hidden";document.documentElement.style.overflow="hidden";return()=>{document.body.style.overflow=bodyOverflow;document.documentElement.style.overflow=htmlOverflow;};},[]);
   useEffect(()=>{
     const key=(event:KeyboardEvent)=>{
