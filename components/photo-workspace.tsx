@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { ArrowLeft, Check, ChevronLeft, ChevronRight, Expand, Heart, ImageOff, Maximize2, Minus, PanelRight, Plus, Search, Share2, StickyNote, X } from "lucide-react";
+import { ArrowLeft, Check, ChevronLeft, ChevronRight, Expand, Heart, ImageOff, Minimize2, Minus, PanelRight, Plus, Search, Share2, StickyNote, X } from "lucide-react";
 import { api } from "@/services/api";
 import type {AlbumData,Photo} from "@/types";
 
@@ -24,6 +24,8 @@ export function Preview({photo,photos,albumId,albumName,onClose,onNavigate,onTog
   const [saving,setSaving]=useState(false);
   const [message,setMessage]=useState("");
   const [detailsOpen,setDetailsOpen]=useState(false);
+  const [fullscreen,setFullscreen]=useState(false);
+  const [immersive,setImmersive]=useState(false);
   const stage=useRef<HTMLDivElement>(null);
   const image=useRef<HTMLImageElement>(null);
   const drag=useRef<{pointerId:number;startX:number;startY:number;panX:number;panY:number}|null>(null);
@@ -34,16 +36,22 @@ export function Preview({photo,photos,albumId,albumName,onClose,onNavigate,onTog
   useEffect(()=>{close.current?.focus();},[]);
   useEffect(()=>{for(const adjacent of [photos[index-1],photos[index+1]]){if(!adjacent?.previewUrl)continue;const preloader=new window.Image();preloader.src=adjacent.previewUrl;}},[index,photos]);
   useEffect(()=>{const bodyOverflow=document.body.style.overflow;const htmlOverflow=document.documentElement.style.overflow;document.body.style.overflow="hidden";document.documentElement.style.overflow="hidden";return()=>{document.body.style.overflow=bodyOverflow;document.documentElement.style.overflow=htmlOverflow;};},[]);
+  useEffect(()=>{const onFullscreenChange=()=>setFullscreen(Boolean(document.fullscreenElement));document.addEventListener("fullscreenchange",onFullscreenChange);return()=>document.removeEventListener("fullscreenchange",onFullscreenChange);},[]);
+  useEffect(()=>()=>{if(document.fullscreenElement)void document.exitFullscreen().catch(()=>{});},[]);
   useEffect(()=>{
     const key=(event:KeyboardEvent)=>{
-      if(event.key==="Escape")onClose();
+      if(event.key==="Escape"){
+        if(document.fullscreenElement)return;
+        if(immersive){event.preventDefault();setImmersive(false);return;}
+        onClose();
+      }
       if(event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLInputElement) return;
       if(event.key==="ArrowLeft"){event.preventDefault();prev();}
       if(event.key==="ArrowRight"){event.preventDefault();next();}
       if(event.code==="Space"&&showSelection){event.preventDefault();if(!locked)onToggle?.(photo);}
     };
     window.addEventListener("keydown",key);return()=>window.removeEventListener("keydown",key);
-  },[onClose,prev,next,onToggle,photo,locked,showSelection]);
+  },[onClose,prev,next,onToggle,photo,locked,showSelection,immersive]);
   const clampPan=(x:number,y:number,scale=zoom)=>{
     const bounds=stage.current,photoImage=image.current;
     if(!bounds||!photoImage||scale<=1)return {x:0,y:0};
@@ -55,14 +63,23 @@ export function Preview({photo,photos,albumId,albumName,onClose,onNavigate,onTog
   const startDrag=(event:React.PointerEvent<HTMLImageElement>)=>{if(zoom<=1)return;event.preventDefault();event.currentTarget.setPointerCapture(event.pointerId);drag.current={pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,panX:pan.x,panY:pan.y};setDragging(true);};
   const moveDrag=(event:React.PointerEvent<HTMLImageElement>)=>{const current=drag.current;if(!current||current.pointerId!==event.pointerId)return;setPan(clampPan(current.panX+event.clientX-current.startX,current.panY+event.clientY-current.startY));};
   const stopDrag=(event:React.PointerEvent<HTMLImageElement>)=>{if(drag.current?.pointerId!==event.pointerId)return;drag.current=null;setDragging(false);};
+  const toggleFullscreen=async()=>{
+    if(document.fullscreenElement){await document.exitFullscreen().catch(()=>{});setFullscreen(false);return;}
+    if(immersive){setImmersive(false);return;}
+    try{
+      if(!document.documentElement.requestFullscreen)throw new Error("Fullscreen API không khả dụng");
+      await document.documentElement.requestFullscreen();
+      if(!document.fullscreenElement)setImmersive(true);
+    }catch{setImmersive(true);}
+  };
   const save=async()=>{if(!onSaveNote)return;setSaving(true);setMessage("");try{await onSaveNote(photo,note);setMessage("Đã lưu ghi chú.");}catch(error){setMessage(error instanceof Error?error.message:"Không lưu được ghi chú.");}finally{setSaving(false);}};
   const share=async()=>{const url=new URL(`/albums/${albumId}?photo=${encodeURIComponent(photo.id)}`,window.location.origin).toString();setMessage("");try{if(navigator.share){await navigator.share({title:albumName,text:`Xem ảnh trong bộ sưu tập ${albumName}`,url});return;}await navigator.clipboard.writeText(url);setMessage("Đã sao chép liên kết ảnh.");}catch(error){if(error instanceof Error&&error.name==="AbortError")return;try{await navigator.clipboard.writeText(url);setMessage("Đã sao chép liên kết ảnh.");}catch{setMessage("Không thể sao chép liên kết trên thiết bị này.");}}};
-  return <div className="modal-backdrop viewer-backdrop" role="presentation"><section className="lightbox drive-viewer" role="dialog" aria-modal="true" aria-label={`Xem ảnh ${photo.fileName}`}>
+  return <div className="modal-backdrop viewer-backdrop" role="presentation"><section className={`lightbox drive-viewer ${immersive&&!fullscreen?"viewer-immersive":""}`} role="dialog" aria-modal="true" aria-label={`Xem ảnh ${photo.fileName}`}>
     <header className="lightbox-top">
       <div className="viewer-title"><button ref={close} className="viewer-icon-btn" onClick={onClose} aria-label="Đóng ảnh"><X size={23}/></button><div><strong title={photo.fileName}>{photo.fileName}</strong><span>{albumName} · {index+1} / {photos.length}</span></div></div>
       <div className="viewer-header-actions"><button className={`viewer-icon-btn viewer-favorite ${photo.favorite?"active":""}`} onClick={()=>onFavorite(photo)} aria-label={photo.favorite?"Bỏ ảnh yêu thích":"Thêm vào ảnh yêu thích"}><Heart size={19} fill={photo.favorite?"currentColor":"none"}/></button>{showSelection&&<button className={`viewer-action viewer-select ${photo.selected?"chosen":""}`} onClick={()=>onToggle?.(photo)} disabled={locked}><Check size={17}/><span>{!canSelect?"Đăng nhập":photo.selected?"Đã chọn":"Chọn ảnh"}</span></button>}<button className="viewer-action" onClick={share}><Share2 size={17}/><span className="viewer-action-label">Chia sẻ</span></button><button className={`viewer-icon-btn ${detailsOpen?"active":""}`} onClick={()=>setDetailsOpen(value=>!value)} aria-label="Chi tiết ảnh" aria-expanded={detailsOpen}><PanelRight size={20}/></button></div>
     </header>
-    <div className="lightbox-body"><div className="lightbox-visual"><div className="lightbox-tools"><button onClick={()=>changeZoom(zoom-.25)} aria-label="Thu nhỏ"><Minus size={18}/></button><span>{Math.round(zoom*100)}%</span><button onClick={()=>changeZoom(zoom+.25)} aria-label="Phóng to"><Plus size={18}/></button><span className="viewer-tool-divider"/><button onClick={()=>changeZoom(1)} aria-label="Vừa màn hình"><Maximize2 size={18}/></button><button onClick={()=>stage.current?.requestFullscreen?.()} aria-label="Toàn màn hình"><Expand size={18}/></button></div><div className="lightbox-stage" ref={stage} onWheel={event=>{event.preventDefault();event.stopPropagation();changeZoom(zoom+(event.deltaY<0?.15:-.15));}}><button className="stage-arrow left" onClick={prev} disabled={index===0} aria-label="Ảnh trước"><ChevronLeft/></button><img ref={image} className={`preview-image ${zoom>1?"zoomed":""}${dragging?" dragging":""}`} src={photo.previewUrl} alt={photo.fileName} draggable={false} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={stopDrag} onPointerCancel={stopDrag} onLostPointerCapture={()=>{drag.current=null;setDragging(false);}} style={{transform:`translate3d(${pan.x}px,${pan.y}px,0) scale(${zoom})`}}/><button className="stage-arrow right" onClick={next} disabled={index===photos.length-1} aria-label="Ảnh sau"><ChevronRight/></button></div></div>
+    <div className="lightbox-body"><div className="lightbox-visual"><div className="lightbox-tools"><button onClick={()=>changeZoom(zoom-.25)} aria-label="Thu nhỏ"><Minus size={18}/></button><span>{Math.round(zoom*100)}%</span><button onClick={()=>changeZoom(zoom+.25)} aria-label="Phóng to"><Plus size={18}/></button><span className="viewer-tool-divider"/><button onClick={toggleFullscreen} aria-label={fullscreen||immersive?"Thoát toàn màn hình":"Toàn màn hình"}>{fullscreen||immersive?<Minimize2 size={18}/>:<Expand size={18}/>}</button></div><div className="lightbox-stage" ref={stage} onWheel={event=>{event.preventDefault();event.stopPropagation();changeZoom(zoom+(event.deltaY<0?.15:-.15));}}><button className="stage-arrow left" onClick={prev} disabled={index===0} aria-label="Ảnh trước"><ChevronLeft/></button><img ref={image} className={`preview-image ${zoom>1?"zoomed":""}${dragging?" dragging":""}`} src={photo.previewUrl} alt={photo.fileName} draggable={false} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={stopDrag} onPointerCancel={stopDrag} onLostPointerCapture={()=>{drag.current=null;setDragging(false);}} style={{transform:`translate3d(${pan.x}px,${pan.y}px,0) scale(${zoom})`}}/><button className="stage-arrow right" onClick={next} disabled={index===photos.length-1} aria-label="Ảnh sau"><ChevronRight/></button></div></div>
     <aside className={`lightbox-side ${detailsOpen?"open":""}`} aria-hidden={!detailsOpen} inert={!detailsOpen}><div className="viewer-side-header"><div><p className="eyebrow">CHI TIẾT ẢNH</p><h2>Thông tin</h2></div><button className="icon-btn" onClick={()=>setDetailsOpen(false)} aria-label="Đóng chi tiết"><X size={20}/></button></div><p className="file-name-detail"><span>Tên tệp</span><strong>{photo.fileName}</strong></p><p className="subtle">{albumName} · Ảnh {index+1} / {photos.length}</p><p className="subtle">Nguồn: {photo.driveUrl?"Google Drive":"Album ảnh"}</p>{photo.driveUrl&&<a href={photo.driveUrl} target="_blank" rel="noreferrer" className="plain-link">Mở trên Google Drive ↗</a>}{showSelection&&locked&&<p className="hint">Lựa chọn đã gửi. Hãy chọn lại để chỉnh sửa.</p>}
       {allowNote&&<div className="note-field"><label htmlFor="photo-note">Ghi chú cho ảnh</label><textarea id="photo-note" value={note} onChange={event=>setNote(event.target.value)} maxLength={2000} placeholder="Ví dụ: Cần crop phần bên trái..." disabled={locked}/><button className="secondary-btn" onClick={save} disabled={saving||locked||(canSelect&&note===(photo.note??""))}>{saving?"Đang lưu...":canSelect?"Lưu ghi chú":"Đăng nhập để ghi chú"}</button></div>}
       <p className="keyboard-tip">← → chuyển ảnh · {showSelection&&"Space chọn ảnh · "}Kéo ảnh khi zoom · Esc đóng</p></aside>{message&&<p className="viewer-message" role="status">{message}</p>}</div>
